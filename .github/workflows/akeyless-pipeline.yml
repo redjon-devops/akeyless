@@ -2,8 +2,7 @@ name: Akeyless Postgres Pipeline
 
 on:
   push:
-    branches:
-      - main
+    branches: [ main ]
 
 jobs:
   setup-akeyless:
@@ -23,15 +22,19 @@ jobs:
           mv akeyless $HOME/.local/bin/
           echo "$HOME/.local/bin" >> $GITHUB_PATH
 
-      - name: Authenticate to Akeyless
+      - name: Authenticate non-interactively
         run: |
           echo "$AKEYLESS_GITHUB_TOKEN" > token.txt
-          akeyless auth github --token-file token.txt --profile default
-          akeyless auth list
-          
+          akeyless auth github \
+            --token-file token.txt \
+            --json true \
+            --profile ci-profile
+          echo "Profile 'ci-profile' created"
+
       - name: Create PostgreSQL Target
         run: |
           akeyless target create postgresql \
+            --profile ci-profile \
             --name "/demo/postgres-target" \
             --host "host.docker.internal" \
             --port 5432 \
@@ -42,6 +45,7 @@ jobs:
       - name: Create Dynamic Secret
         run: |
           akeyless dynamic-secret create postgresql \
+            --profile ci-profile \
             --name "/demo/postgres-secret" \
             --target-name "/demo/postgres-target" \
             --username "dynuser" \
@@ -50,4 +54,5 @@ jobs:
       - name: Get Secret Value
         run: |
           akeyless dynamic-secret get-value \
+            --profile ci-profile \
             --name "/demo/postgres-secret"
