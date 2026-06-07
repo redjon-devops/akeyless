@@ -1,60 +1,64 @@
 name: Akeyless Dynamic Secret Demo
 
 on:
-  push:
-    branches:
-      - main
   workflow_dispatch:
 
 jobs:
-  local-demo:
-    runs-on: windows-latest
+  dynamic-secret-demo:
+    runs-on: ubuntu-latest
 
     steps:
-    - name: Checkout repo
-      uses: actions/checkout@v3
+      - name: Checkout
+        uses: actions/checkout@v4
 
-    - name: Set up Docker
-      uses: docker/setup-buildx-action@v2
+      - name: Install Akeyless CLI
+        run: |
+          curl -o akeyless https://akeyless-cli.s3.us-east-2.amazonaws.com/cli/latest/production/cli-linux-amd64
+          chmod +x akeyless
+          sudo mv akeyless /usr/local/bin/
 
-    - name: Start Postgres DB
-      shell: powershell
-      run: |
-        docker run -d `
-          --name postgres-db `
-          -e POSTGRES_USER=admin `
-          -e POSTGRES_PASSWORD=admin123 `
-          -e POSTGRES_DB=testdb `
-          -p 5432:5432 `
-          postgres
-        Start-Sleep -Seconds 10
+      - name: Verify CLI
+        run: |
+          akeyless --version
 
-    - name: Start Akeyless Gateway
-      shell: powershell
-      run: |
-        docker run -d `
-          -p 8000:8000 `
-          -p 5696:5696 `
-          --name akeyless-gateway `
-          akeyless/base:latest-akeyless
-        Start-Sleep -Seconds 20
+      - name: Get Dynamic Secret
+        env:
+          AKEYLESS_ACCESS_ID: ${{ secrets.AKEYLESS_ACCESS_ID }}
+          AKEYLESS_ACCESS_KEY: ${{ secrets.AKEYLESS_ACCESS_KEY }}
+        run: |
 
-    - name: Test Gateway Health
-      shell: powershell
-      run: |
-        curl.exe -X GET http://localhost:8000/health
+          TOKEN=$(akeyless auth \
+            --access-id "$AKEYLESS_ACCESS_ID" \
+            --access-key "$AKEYLESS_ACCESS_KEY" \
+            --json | jq -r '.token')
 
-    - name: Fetch Dynamic Secret (Example)
-      shell: powershell
-      run: |
-        # Shembull i thjeshtë: do përdorim API lokal për demo
-        # Zëvendëso me SDK ose API reale për DB
-        Write-Host "Fetching dynamic secret from Akeyless..."
-        $secret = "demo-dynamic-secret-value"
-        Write-Host "Fetched Secret: $secret"
+          echo "TOKEN acquired"
 
-    - name: Cleanup
-      shell: powershell
-      run: |
-        docker stop akeyless-gateway, postgres-db
-        docker rm akeyless-gateway, postgres-db
+          akeyless get-dynamic-secret-value \
+            --name "/Candidate GitHub Access/login/redjon-devops/postgres-secret" \
+            --token "$TOKEN" \
+            --json > secret.json
+
+          cat secret.json
+
+      - name: Extract Secret Values
+        run: |
+          echo "DB_USER=$(jq -r '.username' secret.json)" >> $GITHUB_ENV
+          echo "DB_PASS=$(jq -r '.password' secret.json)" >> $GITHUB_ENV
+          echo "DB_HOST=$(jq -r '.host' secret.json)" >> $GITHUB_ENV
+          echo "DB_NAME=$(jq -r '.db_name' secret.json)" >> $GITHUB_ENV
+
+      - name: Install PostgreSQL Client
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y postgresql-client
+
+      - name: Test Database Connection
+        env:
+          PGPASSWORD: ${{ env.DB_PASS }}
+        run: |
+          psql \
+            -h "$DB_HOST" \
+            -U "$DB_USER" \
+            -d "$DB_NAME" \
+            -c "SELECT version();"
