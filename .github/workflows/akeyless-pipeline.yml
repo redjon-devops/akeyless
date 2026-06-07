@@ -1,65 +1,55 @@
-name: Akeyless Dynamic Secret Demo
+name: Akeyless CI/CD Demo
 
 on:
+  push:
+    branches:
+      - main
   workflow_dispatch:
 
 jobs:
-  dynamic-secret-demo:
+  akeyless-demo:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
 
-      - name: Install Akeyless CLI
-        run: |
-          curl -o akeyless https://akeyless-cli.s3.us-east-2.amazonaws.com/cli/latest/production/cli-linux-amd64
-          chmod +x akeyless
-          mkdir -p $HOME/.akeyless/bin
-          mv akeyless $HOME/.akeyless/bin/
-          echo "$HOME/.akeyless/bin" >> $GITHUB_PATH
+    # 1️⃣ Checkout repo
+    - name: Checkout Repository
+      uses: actions/checkout@v3
 
-      - name: Verify CLI
-        run: |
-          akeyless --version
+    # 2️⃣ Install jq (nevojitet për parsing JSON)
+    - name: Install jq
+      run: sudo apt-get update && sudo apt-get install -y jq
 
-      - name: Authenticate with Akeyless
-        env:
-          AKEYLESS_ACCESS_ID: ${{ secrets.AKEYLESS_ACCESS_ID }}
-          AKEYLESS_ACCESS_KEY: ${{ secrets.AKEYLESS_ACCESS_KEY }}
-        run: |
-          TOKEN=$(akeyless auth \
-            --access-id "$AKEYLESS_ACCESS_ID" \
-            --access-key "$AKEYLESS_ACCESS_KEY" \
-            --json | jq -r '.token')
-          echo "TOKEN=$TOKEN" >> $GITHUB_ENV
+    # 3️⃣ Install Akeyless CLI
+    - name: Install Akeyless CLI
+      run: |
+        curl -o akeyless https://akeyless-cli.s3.us-east-2.amazonaws.com/cli/latest/production/cli-linux-amd64
+        chmod +x akeyless
+        mkdir -p $HOME/.local/bin
+        mv akeyless $HOME/.local/bin/
+        echo "$HOME/.local/bin" >> $GITHUB_PATH
 
-      - name: Get Dynamic Secret
-        run: |
-          akeyless get-dynamic-secret-value \
-            --name "/Candidate GitHub Access/login/redjon-devops/postgres-secret" \
-            --token "$TOKEN" \
-            --json > secret.json
-          cat secret.json
+    # 4️⃣ Authenticate with GitHub token
+    - name: Authenticate to Akeyless via GitHub
+      env:
+        AKEYLESS_GITHUB_TOKEN: ${{ secrets.AKEYLESS_GITHUB_TOKEN }}
+      run: |
+        echo "$AKEYLESS_GITHUB_TOKEN" > token.txt
+        TOKEN=$(akeyless auth github --token-file token.txt --output json | jq -r '.token')
+        echo "TOKEN=$TOKEN" >> $GITHUB_ENV
 
-      - name: Extract Secret Values
-        run: |
-          echo "DB_USER=$(jq -r '.username' secret.json)" >> $GITHUB_ENV
-          echo "DB_PASS=$(jq -r '.password' secret.json)" >> $GITHUB_ENV
-          echo "DB_HOST=$(jq -r '.host' secret.json)" >> $GITHUB_ENV
-          echo "DB_NAME=$(jq -r '.db_name' secret.json)" >> $GITHUB_ENV
+    # 5️⃣ Create a test secret
+    - name: Create a Test Secret
+      run: |
+        akeyless secret create --name "/example/test-secret" --value "supersecret" --token $TOKEN
 
-      - name: Install PostgreSQL Client
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y postgresql-client
+    # 6️⃣ Fetch secret and use it
+    - name: Fetch Secret
+      run: |
+        VALUE=$(akeyless secret get-value --name "/example/test-secret" --token $TOKEN)
+        echo "Fetched secret: $VALUE"
 
-      - name: Test Database Connection
-        env:
-          PGPASSWORD: ${{ env.DB_PASS }}
-        run: |
-          psql \
-            -h "$DB_HOST" \
-            -U "$DB_USER" \
-            -d "$DB_NAME" \
-            -c "SELECT version();"
+    # 7️⃣ Optional: use secret in your script/job
+    - name: Use Secret in Script
+      run: |
+        echo "Using secret in job: $VALUE"
