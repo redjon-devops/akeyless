@@ -1,55 +1,43 @@
-name: Akeyless CI/CD Demo
+name: Akeyless Demo Pipeline
 
 on:
-  push:
-    branches:
-      - main
   workflow_dispatch:
 
 jobs:
-  akeyless-demo:
+  demo:
     runs-on: ubuntu-latest
 
     steps:
+      - name: Install Akeyless CLI
+        run: |
+          curl -o akeyless https://akeyless-cli.s3.us-east-2.amazonaws.com/cli/latest/production/cli-linux-amd64
+          chmod +x akeyless
+          sudo mv akeyless /usr/local/bin/
 
-    # 1️⃣ Checkout repo
-    - name: Checkout Repository
-      uses: actions/checkout@v3
+      - name: Auth to Akeyless
+        env:
+          ACCESS_ID: ${{ secrets.AKEYLESS_ACCESS_ID }}
+          ACCESS_KEY: ${{ secrets.AKEYLESS_ACCESS_KEY }}
+        run: |
+          akeyless auth --access-id "$ACCESS_ID" --access-key "$ACCESS_KEY"
 
-    # 2️⃣ Install jq (nevojitet për parsing JSON)
-    - name: Install jq
-      run: sudo apt-get update && sudo apt-get install -y jq
+      - name: Create Target
+        run: |
+          akeyless target create postgres \
+            --name "/ci/postgres" \
+            --host "host.docker.internal" \
+            --port 5433 \
+            --username "admin" \
+            --password "admin123" \
+            --db-name "testdb"
 
-    # 3️⃣ Install Akeyless CLI
-    - name: Install Akeyless CLI
-      run: |
-        curl -o akeyless https://akeyless-cli.s3.us-east-2.amazonaws.com/cli/latest/production/cli-linux-amd64
-        chmod +x akeyless
-        mkdir -p $HOME/.local/bin
-        mv akeyless $HOME/.local/bin/
-        echo "$HOME/.local/bin" >> $GITHUB_PATH
+      - name: Create Dynamic Secret
+        run: |
+          akeyless dynamic-secret create postgres \
+            --name "/ci/postgres-secret" \
+            --target-name "/ci/postgres"
 
-    # 4️⃣ Authenticate with GitHub token
-    - name: Authenticate to Akeyless via GitHub
-      env:
-        AKEYLESS_GITHUB_TOKEN: ${{ secrets.AKEYLESS_GITHUB_TOKEN }}
-      run: |
-        echo "$AKEYLESS_GITHUB_TOKEN" > token.txt
-        TOKEN=$(akeyless auth github --token-file token.txt --output json | jq -r '.token')
-        echo "TOKEN=$TOKEN" >> $GITHUB_ENV
-
-    # 5️⃣ Create a test secret
-    - name: Create a Test Secret
-      run: |
-        akeyless secret create --name "/example/test-secret" --value "supersecret" --token $TOKEN
-
-    # 6️⃣ Fetch secret and use it
-    - name: Fetch Secret
-      run: |
-        VALUE=$(akeyless secret get-value --name "/example/test-secret" --token $TOKEN)
-        echo "Fetched secret: $VALUE"
-
-    # 7️⃣ Optional: use secret in your script/job
-    - name: Use Secret in Script
-      run: |
-        echo "Using secret in job: $VALUE"
+      - name: Fetch Secret
+        run: |
+          akeyless dynamic-secret get-value \
+            --name "/ci/postgres-secret"
