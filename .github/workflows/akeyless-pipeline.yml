@@ -1,43 +1,53 @@
-name: Akeyless Demo Pipeline
+name: Akeyless Postgres Pipeline
 
 on:
-  workflow_dispatch:
+  push:
+    branches:
+      - main
 
 jobs:
-  demo:
+  setup-akeyless:
     runs-on: ubuntu-latest
+    env:
+      AKEYLESS_GITHUB_TOKEN: ${{ secrets.AKEYLESS_GITHUB_TOKEN }}
 
     steps:
+      - name: Checkout repository
+        uses: actions/checkout@v3
+
       - name: Install Akeyless CLI
         run: |
           curl -o akeyless https://akeyless-cli.s3.us-east-2.amazonaws.com/cli/latest/production/cli-linux-amd64
           chmod +x akeyless
-          sudo mv akeyless /usr/local/bin/
+          mkdir -p $HOME/.local/bin
+          mv akeyless $HOME/.local/bin/
+          echo "$HOME/.local/bin" >> $GITHUB_PATH
 
-      - name: Auth to Akeyless
-        env:
-          ACCESS_ID: ${{ secrets.AKEYLESS_ACCESS_ID }}
-          ACCESS_KEY: ${{ secrets.AKEYLESS_ACCESS_KEY }}
+      - name: Authenticate to Akeyless
         run: |
-          akeyless auth --access-id "$ACCESS_ID" --access-key "$ACCESS_KEY"
-
-      - name: Create Target
+          echo "$AKEYLESS_GITHUB_TOKEN" > token.txt
+          akeyless auth github --token-file token.txt --profile default
+          akeyless auth list
+          
+      - name: Create PostgreSQL Target
         run: |
-          akeyless target create postgres \
-            --name "/ci/postgres" \
+          akeyless target create postgresql \
+            --name "/demo/postgres-target" \
             --host "host.docker.internal" \
-            --port 5433 \
+            --port 5432 \
             --username "admin" \
             --password "admin123" \
             --db-name "testdb"
 
       - name: Create Dynamic Secret
         run: |
-          akeyless dynamic-secret create postgres \
-            --name "/ci/postgres-secret" \
-            --target-name "/ci/postgres"
+          akeyless dynamic-secret create postgresql \
+            --name "/demo/postgres-secret" \
+            --target-name "/demo/postgres-target" \
+            --username "dynuser" \
+            --password "dynpass"
 
-      - name: Fetch Secret
+      - name: Get Secret Value
         run: |
           akeyless dynamic-secret get-value \
-            --name "/ci/postgres-secret"
+            --name "/demo/postgres-secret"
