@@ -15,30 +15,31 @@ jobs:
         run: |
           curl -o akeyless https://akeyless-cli.s3.us-east-2.amazonaws.com/cli/latest/production/cli-linux-amd64
           chmod +x akeyless
-          sudo mv akeyless /usr/local/bin/
+          mkdir -p $HOME/.akeyless/bin
+          mv akeyless $HOME/.akeyless/bin/
+          echo "$HOME/.akeyless/bin" >> $GITHUB_PATH
 
       - name: Verify CLI
         run: |
           akeyless --version
 
-      - name: Get Dynamic Secret
+      - name: Authenticate with Akeyless
         env:
           AKEYLESS_ACCESS_ID: ${{ secrets.AKEYLESS_ACCESS_ID }}
           AKEYLESS_ACCESS_KEY: ${{ secrets.AKEYLESS_ACCESS_KEY }}
         run: |
-
           TOKEN=$(akeyless auth \
             --access-id "$AKEYLESS_ACCESS_ID" \
             --access-key "$AKEYLESS_ACCESS_KEY" \
             --json | jq -r '.token')
+          echo "TOKEN=$TOKEN" >> $GITHUB_ENV
 
-          echo "TOKEN acquired"
-
+      - name: Get Dynamic Secret
+        run: |
           akeyless get-dynamic-secret-value \
             --name "/Candidate GitHub Access/login/redjon-devops/postgres-secret" \
             --token "$TOKEN" \
             --json > secret.json
-
           cat secret.json
 
       - name: Extract Secret Values
